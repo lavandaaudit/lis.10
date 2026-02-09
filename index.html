@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="uk">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>IBONIRIUM · SPACE FOREST · TIMELINE SYNC</title>
+
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { width: 100%; height: 100%; background: #000; overflow: hidden; font-family: monospace; cursor: crosshair; }
+        canvas { position: fixed; inset: 0; }
+        #sensors { position: fixed; left: 0; right: 0; bottom: 0; height: 180px; pointer-events: none; }
+        #info { position: fixed; bottom: 12px; left: 12px; color: #9affc2; font-size: 11px; line-height: 1.5; opacity: 0.9; text-shadow: 0 0 8px rgba(0, 0, 0, 0.8); pointer-events: none; }
+        #panel { position: fixed; bottom: 12px; right: 12px; max-width: 420px; color: #c7ffd9; font-size: 11px; line-height: 1.5; background: linear-gradient(to left, rgba(0, 0, 0, 0.75), transparent); padding: 14px 18px; text-shadow: 0 0 6px rgba(0, 0, 0, 0.9); pointer-events: none; }
+        #cycle { position: fixed; top: 12px; right: 12px; color: #ffd700; font-size: 13px; background: rgba(0, 0, 0, 0.6); padding: 10px 14px; border-radius: 4px; pointer-events: none; }
+        #treeInfo { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0, 0, 0, 0.9); border: 2px solid #0ff; padding: 20px; border-radius: 8px; color: #0ff; max-width: 400px; display: none; box-shadow: 0 0 30px rgba(0, 255, 255, 0.5); }
+    </style>
+</head>
+
+<body>
+    <canvas id="stars"></canvas>
+    <canvas id="aurora"></canvas>
+    <canvas id="forestBack"></canvas>
+    <canvas id="forestMid"></canvas>
+    <canvas id="forestFront"></canvas>
+    <canvas id="sensors"></canvas>
+
+    <div id="info">
+        <b>IBONIRIUM · ETERNAL TIMELINE</b><br>
+        Status: <span id="syncStatus">Syncing with 01.01.2026...</span><br>
+        Cycle: <span id="cycleNum">1</span> | Day: <span id="dayNum">–</span><br>
+        <br>
+        <b>☀ NOAA LIVE</b><br>
+        SSN: <span id="ssn">–</span> | Kp: <span id="kp">–</span><br>
+        Flare: <span id="flare">None</span><br>
+        <br>
+        <b>🌲 FOREST GENETICS</b><br>
+        Trees: <span id="treeCount">–</span><br>
+        Avg Gen: <span id="avgGen">–</span>
+    </div>
+
+    <div id="panel">
+        <b>ВІЙШОВ У РЕЖИМ ТАЙМЛАЙНУ</b><br>
+        Ліс автоматично розраховує свій стан від 1 січня 2026.<br>
+        <br>
+        - Сьогодні: <b>9 лютого</b> (Цикл 4, День 0).<br>
+        - Дерева вже пройшли 3 етапи поділу та мутацій.<br>
+        - Кожна секунда реального часу додає росту.<br>
+        - Нова мутація відбудеться автоматично 22 лютого.
+    </div>
+
+    <div id="cycle">🔄 CYCLE <span id="cycleDisplay">...</span></div>
+
+    <div id="treeInfo">
+        <h3>🌲 Deep Scan</h3>
+        <div id="treeDetails"></div>
+    </div>
+
+    <script>
+        const canvases = ['stars', 'aurora', 'forestBack', 'forestMid', 'forestFront', 'sensors'];
+        const ctxs = {};
+        canvases.forEach(id => {
+            const c = document.getElementById(id);
+            ctxs[id] = c.getContext('2d');
+        });
+
+        function resize() {
+            canvases.forEach(id => {
+                const c = document.getElementById(id);
+                c.width = innerWidth;
+                c.height = id === 'sensors' ? 180 : innerHeight;
+            });
+        }
+        window.addEventListener('resize', resize); resize();
+
+        // --- TIME ENGINE ---
+        const START_DATE = new Date('2026-01-01T00:00:00');
+        const MS_PER_CYCLE = 13 * 24 * 60 * 60 * 1000;
+        const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+        let timeline = {
+            totalMs: 0,
+            cyclesCompleted: 0,
+            msInCurrentCycle: 0,
+            progress: 0,
+            dayInCycle: 0
+        };
+
+        function updateTimeline() {
+            const now = new Date();
+            timeline.totalMs = now - START_DATE;
+            timeline.cyclesCompleted = Math.floor(timeline.totalMs / MS_PER_CYCLE);
+            timeline.msInCurrentCycle = timeline.totalMs % MS_PER_CYCLE;
+            timeline.progress = timeline.msInCurrentCycle / MS_PER_CYCLE;
+            timeline.dayInCycle = Math.floor(timeline.msInCurrentCycle / MS_PER_DAY);
+
+            document.getElementById('cycleNum').textContent = timeline.cyclesCompleted + 1;
+            document.getElementById('dayNum').textContent = timeline.dayInCycle;
+            document.getElementById('cycleDisplay').textContent = (timeline.cyclesCompleted + 1) + " | DAY " + timeline.dayInCycle;
+            document.getElementById('syncStatus').textContent = "Timeline Connected";
+        }
+
+        // --- NOAA & ENVIRONMENT ---
+        let ssn = 20, kp = 1, flare = 'None', storm = 0, rad = 0;
+        async function fetchWeather() {
+            try {
+                const r = await fetch('https://services.swpc.noaa.gov/json/planetary_k_index_1m.json');
+                const data = await r.json();
+                kp = data[data.length-1].kp_index;
+                document.getElementById('kp').textContent = kp.toFixed(1);
+                storm = kp / 9;
+            } catch(e) {}
+        }
+        setInterval(fetchWeather, 300000); fetchWeather();
+
+        // --- FOREST EVOLUTION ---
+        class DeterministicTree {
+            constructor(id, layer) {
+                this.id = id;
+                this.x = (Math.abs(Math.sin(id * 456.789)) * 0.9) + 0.05;
+                this.layer = layer;
+                this.baseSeed = id * 123.456;
+            }
+
+            getParams(cycle) {
+                // Параметри змінюються кожного циклу (мутація)
+                const seed = this.baseSeed + cycle;
+                const rnd = (n) => Math.abs(Math.sin(seed * n));
+                return {
+                    type: Math.floor(rnd(1.1) * 4),
+                    maxAge: 4 + rnd(1.2) * 3,
+                    angle: 0.4 + rnd(1.3) * 0.5,
+                    colorOff: rnd(1.4) * 60
+                };
+            }
+
+            draw(ctx) {
+                const cycle = timeline.cyclesCompleted;
+                const p = this.getParams(cycle);
+                
+                // ВІК: накопичена пам'ять + поточний прогрес
+                // Чим більше циклів пройшло, тим більше "пам'яті" (складності)
+                const memory = cycle * 1.2; 
+                const age = (timeline.progress * p.maxAge) + memory;
+
+                const scale = this.layer === 'back' ? 0.6 : this.layer === 'mid' ? 0.85 : 1.1;
+                const opacity = this.layer === 'back' ? 0.4 : this.layer === 'mid' ? 0.7 : 1.0;
+                
+                const pf = this.layer === 'back' ? 0.02 : this.layer === 'mid' ? 0.05 : 0.1;
+                let x = (this.x + (mouseX - 0.5) * pf) * ctx.canvas.width;
+                let y = (ctx.canvas.height * 0.8) + (mouseY - 0.5) * pf * 50;
+
+                let len = (40 + cycle * 8) * scale;
+                let angle = -Math.PI / 2;
+                let hue = 140 + p.colorOff + (storm * 100);
+
+                ctx.strokeStyle = `hsla(${hue}, 80%, 50%, ${opacity})`;
+                ctx.lineWidth = 2;
+
+                const steps = Math.min(25, Math.floor(age * 1.8));
+                for(let i=0; i<steps; i++) {
+                    const nx = x + Math.cos(angle) * len;
+                    const ny = y + Math.sin(angle) * len;
+                    ctx.lineWidth = Math.max(1, len * 0.1);
+                    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(nx, ny); ctx.stroke();
+                    angle += Math.sin(i * 1.5 + this.baseSeed + cycle) * p.angle;
+                    x = nx; y = ny; len *= 0.68;
+                }
+
+                const crown = (8 + cycle * 3) * scale * (1 + storm);
+                ctx.fillStyle = `hsla(${hue + 40}, 100%, 70%, ${opacity})`;
+                ctx.beginPath(); ctx.arc(x, y, crown, 0, Math.PI * 2); ctx.fill();
+                
+                if (storm > 0.5) {
+                    ctx.shadowBlur = 15; ctx.shadowColor = 'cyan';
+                    ctx.stroke(); ctx.shadowBlur = 0;
+                }
+            }
+        }
+
+        const forest = [];
+        for(let i=0; i<85; i++) {
+            const layer = i < 25 ? 'back' : i < 55 ? 'mid' : 'front';
+            forest.push(new DeterministicTree(i, layer));
+        }
+
+        // --- INPUT ---
+        let mouseX = 0.5, mouseY = 0.5;
+        window.addEventListener('mousemove', e => {
+            mouseX = e.clientX / innerWidth;
+            mouseY = e.clientY / innerHeight;
+        });
+
+        // --- RENDER ---
+        const stars = Array.from({length: 300}, () => ({x: Math.random(), y: Math.random(), s: Math.random()}));
+        function drawStars() {
+            const ctx = ctxs.stars;
+            ctx.clearRect(0,0,innerWidth,innerHeight);
+            ctx.fillStyle = "white";
+            stars.forEach(s => {
+                ctx.globalAlpha = 0.2 + Math.sin(Date.now()*0.001 + s.x*10)*0.5;
+                ctx.beginPath(); ctx.arc(s.x*innerWidth, s.y*innerHeight, s.s*1.5, 0, Math.PI*2); ctx.fill();
+            });
+        }
+
+        function loop() {
+            updateTimeline();
+            drawStars();
+            
+            ['forestBack', 'forestMid', 'forestFront'].forEach(id => ctxs[id].clearRect(0,0,innerWidth,innerHeight));
+            
+            forest.forEach(t => {
+                if(t.layer === 'back') t.draw(ctxs.forestBack);
+                else if(t.layer === 'mid') t.draw(ctxs.forestMid);
+                else t.draw(ctxs.forestFront);
+            });
+
+            // HUD
+            const sctx = ctxs.sensors;
+            sctx.clearRect(0,0,innerWidth,180);
+            sctx.fillStyle = "#ffd700";
+            sctx.fillRect(50, 140, (innerWidth-100) * timeline.progress, 4);
+            sctx.font = "10px monospace";
+            sctx.fillText("TIMELINE PROGRESS (CYCLE " + (timeline.cyclesCompleted+1) + ")", 50, 130);
+
+            requestAnimationFrame(loop);
+        }
+
+        document.getElementById('treeCount').textContent = forest.length;
+        document.getElementById('avgGen').textContent = timeline.cyclesCompleted + 1;
+        
+        loop();
+    </script>
+</body>
+</html>
